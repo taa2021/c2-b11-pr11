@@ -11,11 +11,10 @@
 
 ## Ход решения (принципиальная схема развертывания)
 
-1. Устанавливаем CI: [1](https://concourse-ci.org/install.html), [2](https://github.com/concourse/concourse-docker)
-
-2. Настраиваем [pipeline](./project.yml)
-
-3. Несколько раз меняем [index.html](./index.html) репозитория, фиксируем результаты работы CI-инструементария
+1. Устанавливаем CI: [1](https://concourse-ci.org/install.html), [2](https://github.com/concourse/concourse-docker).
+1. Копируем  файл переменных (project.vars.secret.yml.template -->  project.vars.secret.yml), настраиваем переменные для оповещения о результате прохождения пайплайна.
+1. Настраиваем [pipeline](./project.yml).
+1. Несколько раз меняем [index.html](./index.html) репозитория, фиксируем результаты работы CI-инструементария.
 
 ## Выводы по решению
 
