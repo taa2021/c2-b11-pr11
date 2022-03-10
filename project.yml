@@ -1,0 +1,148 @@
+---
+resource_types:
+- name: telegram-notification
+  type: docker-image
+  source:
+    repository: w32blaster/concourse-telegram-notifier
+    tag: latest
+
+resources:
+- name: telegram-notification
+  type: telegram-notification
+  source:
+    bot_token: ((telegram-bot-token))
+
+- name: c2-b11-pr11-git
+  type: git
+  icon: github
+  source:
+    uri: https://github.com/taa2021/c2-b11-pr11.git
+
+jobs:
+- name: c2-b11-pr11
+  public: true
+  plan:
+  - get: c2-b11-pr11-git
+    trigger: true
+
+  - task: build-docker-image
+    privileged: true
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source: { repository: concourse/oci-build-task }
+      inputs:
+        - name: c2-b11-pr11-git
+      params:
+        DOCKERFILE: c2-b11-pr11-git/Dockerfile
+      outputs:
+      - name: image
+      caches:
+        - path: cache
+      run:
+        path: build
+
+  - task: calc-sha256-for-repo-index
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source: { repository: busybox }
+      inputs:
+        - name: c2-b11-pr11-git
+      run:
+        path: sh
+        args:
+          - -exc
+          - cat c2-b11-pr11-git/index.html | sha256sum  | tee ./sha256-for-repo-index/hash
+      outputs:
+        - name: sha256-for-repo-index
+
+  - task: calc-sha256-for-container-index
+    privileged: true
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source: { repository: amidos/dcind }
+      inputs:
+        - name: image
+      outputs:
+        - name: sha256-for-container-index
+      run:
+        path: bash
+        args:
+          - -exc
+          - |
+                source /docker-lib.sh
+                start_docker
+
+                docker load -i image/image.tar
+
+                cat image/digest
+                IMAGE_ID=`cat image/digest | cut -d: -f 2 | cut -c-12`
+                CONT_ID=c-${IMAGE_ID}-`date +%Y%m%d%H%M%S`
+                docker images -a
+
+                docker ps
+                docker run --name ${CONT_ID} -d -p 9889:80 ${IMAGE_ID}
+                docker ps
+
+                sleep 5
+                http_response=$(curl -L http://localhost:9889 -sS -o /tmp/cont_index_${CONT_ID}.html -w "%{http_code}")
+                if [ $http_response != "200" ]; then
+                    # handle error
+                    docker rm -f ${CONT_ID}
+                    exit $http_response
+                else
+                    cat /tmp/cont_index_${CONT_ID}.html | sha256sum  | tee ./sha256-for-container-index/hash
+                fi
+
+                docker stop ${CONT_ID}
+                docker rm -f ${CONT_ID}
+                docker ps -a
+
+                # Cleanup.
+                # Not sure if this is required.
+                # It's quite possible that Concourse is smart enough to clean up the Docker mess itself.
+                # docker volume rm $(docker volume ls -q)
+
+  - task: check-repo-and-container-index-file-hashes
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source: { repository: busybox }
+      inputs:
+        - name: sha256-for-repo-index
+        - name: sha256-for-container-index
+      run:
+        path: sh
+        args:
+          - -exc
+          - |
+            echo "Repo index.html sha256:" `cat ./sha256-for-repo-index/hash`
+            echo "Cont index.html sha256:" `cat ./sha256-for-container-index/hash`
+            cmp -s ./sha256-for-repo-index/hash ./sha256-for-container-index/hash || exit 1
+
+  on_success:
+    put: telegram-notification
+    params:
+        chat_id: ((telegram-channel))
+        text: "A stage deploy is successed"
+        # parse_mode: HTML
+
+  on_failure:
+    put: telegram-notification
+    params:
+        chat_id: ((telegram-channel))
+        text: "A stage deploy is failured"
+        # parse_mode: HTML
+
+  on_abort:
+    put: telegram-notification
+    params:
+        chat_id: ((telegram-channel))
+        text: "A stage deploy is aborted"
+        # parse_mode: HTML
