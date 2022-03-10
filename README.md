@@ -1,4 +1,4 @@
-# C2.B10 Проектная работа 11. Continuous Integratio
+# C2.B10 Проектная работа 11. Continuous Integration
 
 
 ## Задание
